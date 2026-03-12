@@ -287,7 +287,7 @@ function gerarGraficoVelocimetro(atingido, total) {
             labels: ['Concluído', 'Restante'],
             datasets: [{ 
                 data: [capAtingido, restante], 
-                backgroundColor: ['#84cc16', '#374151'], // Volta a ser verde para combinar com o tema
+                backgroundColor: ['#84cc16', '#adb1a71f'], 
                 borderWidth: 0 
             }]
         },
