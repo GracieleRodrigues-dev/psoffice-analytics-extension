@@ -359,33 +359,35 @@ function esperarTabela() {
         }
     }, 1000);
 }
-function monitorarBotaoImpressao() {
+
+function sincronizarAnexosContinuamente() {
+    
     setInterval(() => {
-        const botoes = document.querySelectorAll('a:not(.ps-vigiado), button:not(.ps-vigiado)');
-        botoes.forEach(btn => {
-            const texto = btn.innerText || "";
-            const href = btn.getAttribute('href') || "";
+        // Verifica se estamos na tela de detalhes do resumo olhando se o botão de imprimir existe
+        const botaoImprimir = document.querySelector('a[href*="addRep_0"], a[title*="Imprimir resumo"], button[title*="Imprimir resumo"]');
+        
+        if (botaoImprimir) {
+            const linksAnexos = [];
+            const tagsA = document.querySelectorAll('a[href*="docrep.do"]'); 
             
-            if (texto.includes('Imprimir resumo') || href.includes('addRep_0')) {
-                btn.classList.add('ps-vigiado'); 
-                btn.addEventListener('click', () => {
-                    localStorage.removeItem('ps_anexos_impressao');
-                    const linksAnexos = [];
-                    const tagsA = document.querySelectorAll('a[href*="docrep.do"]'); 
-                    tagsA.forEach(a => {
-                        const url = a.href;
-                        const nomeExibicao = a.innerText.toLowerCase();
-                        if (url.match(/\.(jpeg|jpg|png|gif)/i) || nomeExibicao.match(/\.(jpeg|jpg|png|gif)/i)) {
-                            linksAnexos.push(url);
-                        }
-                    });
-                    if (linksAnexos.length > 0) {
-                        localStorage.setItem('ps_anexos_impressao', JSON.stringify(linksAnexos));
-                    }
-                });
+            tagsA.forEach(a => {
+                const url = a.href;
+                const nomeExibicao = a.innerText.toLowerCase();
+                if (url.match(/\.(jpeg|jpg|png|gif)/i) || nomeExibicao.match(/\.(jpeg|jpg|png|gif)/i)) {
+                    linksAnexos.push(url);
+                }
+            });
+
+            if (linksAnexos.length > 0) {
+                // Remove links duplicados caso a tabela repita botões e salva na memória
+                const linksUnicos = [...new Set(linksAnexos)];
+                localStorage.setItem('ps_anexos_impressao', JSON.stringify(linksUnicos));
+            } else {
+                // Se o resumo aberto NÃO tiver imagens, limpa a memória para não imprimir fantasmas
+                localStorage.removeItem('ps_anexos_impressao');
             }
-        });
-    }, 2000);
+        }
+    }, 1500);
 }
 
 function montarAnexosNaImpressao() {
@@ -395,7 +397,7 @@ function montarAnexosNaImpressao() {
     const anexos = JSON.parse(anexosJson);
     if (anexos.length === 0) return;
 
-    if (document.querySelector('.ps-print-page')) return;
+    if (document.querySelector('.ps-print-injected')) return;
 
     const style = document.createElement('style');
     style.innerHTML = `
@@ -411,7 +413,8 @@ function montarAnexosNaImpressao() {
     anexos.forEach((url, i) => {
         if (i % 4 === 0) {
             const pageDiv = document.createElement('div');
-            pageDiv.className = 'ps-print-page ps-print-injected';
+            pageDiv.className = isFirstPage ? 'ps-print-page ps-print-injected' : 'ps-print-page';
+            isFirstPage = false;
             document.body.appendChild(pageDiv);
         }
         
@@ -438,29 +441,23 @@ function montarAnexosNaImpressao() {
 function iniciarExtensao() {
     const urlAtual = window.location.href;
     const titulo = document.title || "";
-    
-    // Procura se a página tem a ordem de auto-imprimir 
     const vaiImprimirSozinho = document.querySelector('body[onload*="print"]') !== null;
 
-    // É o Relatório Final se tiver a tag na URL, o Título exato ou a auto-impressão
     const isTelaRelatorioFinal = urlAtual.includes('state=Exprel') || titulo.includes('Resumo de Despesas') || vaiImprimirSozinho;
-
-    // É a tela de Filtros se tiver o controlador, mas NÃO for a tela final
     const isTelaFiltros = urlAtual.includes('ReportController') && !isTelaRelatorioFinal;
 
     if (isTelaRelatorioFinal) {
         montarAnexosNaImpressao();
     } else if (!isTelaFiltros) {
-        // Em todas as outras telas (A), liberamos o Dashboard e a escuta do botão de imprimir
+        // Em todas as telas normais, rodamos o Dashboard e o Sincronizador de imagens
         if (typeof esperarTabela === "function") {
             esperarTabela();
         }
-        monitorarBotaoImpressao();
-    } 
+        sincronizarAnexosContinuamente();
+    }
 }
 
-// O Chrome pode rodar a extensão antes do título da aba ser lido. 
-// Isso garante que ele espere o HTML carregar para fazer a leitura correta.
+// Garante que o código só execute depois que o HTML estiver pronto para ser lido
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", iniciarExtensao);
 } else {
