@@ -359,4 +359,110 @@ function esperarTabela() {
         }
     }, 1000);
 }
-esperarTabela();
+function monitorarBotaoImpressao() {
+    setInterval(() => {
+        const botoes = document.querySelectorAll('a:not(.ps-vigiado), button:not(.ps-vigiado)');
+        botoes.forEach(btn => {
+            const texto = btn.innerText || "";
+            const href = btn.getAttribute('href') || "";
+            
+            if (texto.includes('Imprimir resumo') || href.includes('addRep_0')) {
+                btn.classList.add('ps-vigiado'); 
+                btn.addEventListener('click', () => {
+                    localStorage.removeItem('ps_anexos_impressao');
+                    const linksAnexos = [];
+                    const tagsA = document.querySelectorAll('a[href*="docrep.do"]'); 
+                    tagsA.forEach(a => {
+                        const url = a.href;
+                        const nomeExibicao = a.innerText.toLowerCase();
+                        if (url.match(/\.(jpeg|jpg|png|gif)/i) || nomeExibicao.match(/\.(jpeg|jpg|png|gif)/i)) {
+                            linksAnexos.push(url);
+                        }
+                    });
+                    if (linksAnexos.length > 0) {
+                        localStorage.setItem('ps_anexos_impressao', JSON.stringify(linksAnexos));
+                    }
+                });
+            }
+        });
+    }, 2000);
+}
+
+function montarAnexosNaImpressao() {
+    const anexosJson = localStorage.getItem('ps_anexos_impressao');
+    if (!anexosJson) return;
+
+    const anexos = JSON.parse(anexosJson);
+    if (anexos.length === 0) return;
+
+    if (document.querySelector('.ps-print-page')) return;
+
+    const style = document.createElement('style');
+    style.innerHTML = `
+        .ps-print-page { page-break-before: always; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; max-width: 800px; margin: 40px auto; background: white; }
+        .ps-print-img-box { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #999; padding: 10px; height: 350px; background: #fff; }
+        .ps-print-img-box img { max-width: 100%; max-height: 90%; object-fit: contain; }
+        .ps-img-title { font-family: Arial, sans-serif; font-size: 11px; color: #333; margin-top: 8px; text-align: center; word-break: break-all; }
+        @media print { .ps-print-page { gap: 10mm; height: 270mm; max-width: 100%; margin: 0; padding-top: 10mm;} .ps-print-img-box { height: 100%; max-height: 125mm; border-color: #ccc; } }
+    `;
+    document.head.appendChild(style);
+
+    let isFirstPage = true;
+    anexos.forEach((url, i) => {
+        if (i % 4 === 0) {
+            const pageDiv = document.createElement('div');
+            pageDiv.className = 'ps-print-page ps-print-injected';
+            document.body.appendChild(pageDiv);
+        }
+        
+        const containers = document.querySelectorAll('.ps-print-page');
+        const lastPage = containers[containers.length - 1];
+
+        const box = document.createElement('div');
+        box.className = 'ps-print-img-box';
+        const img = document.createElement('img');
+        img.src = url;
+        
+        const matchNome = url.match(/nome=([^&]+)/);
+        const nomeArquivo = matchNome ? decodeURIComponent(matchNome[1]) : "Anexo";
+        const titulo = document.createElement('div');
+        titulo.className = 'ps-img-title';
+        titulo.innerText = nomeArquivo;
+
+        box.appendChild(img);
+        box.appendChild(titulo);
+        lastPage.appendChild(box);
+    });
+}
+
+function iniciarExtensao() {
+    const urlAtual = window.location.href;
+    const titulo = document.title || "";
+    
+    // Procura se a página tem a ordem de auto-imprimir 
+    const vaiImprimirSozinho = document.querySelector('body[onload*="print"]') !== null;
+
+    // É o Relatório Final se tiver a tag na URL, o Título exato ou a auto-impressão
+    const isTelaRelatorioFinal = urlAtual.includes('state=Exprel') || titulo.includes('Resumo de Despesas') || vaiImprimirSozinho;
+
+    // É a tela de Filtros se tiver o controlador, mas NÃO for a tela final
+    const isTelaFiltros = urlAtual.includes('ReportController') && !isTelaRelatorioFinal;
+
+    if (isTelaRelatorioFinal) {
+        montarAnexosNaImpressao();
+    } else if (!isTelaFiltros) {
+        // Em todas as outras telas (A), liberamos o Dashboard e a escuta do botão de imprimir
+        if (typeof esperarTabela === "function") {
+            esperarTabela();
+        }
+        monitorarBotaoImpressao();
+    } 
+}
+
+// O Chrome pode rodar a extensão antes do título da aba ser lido. 
+// Isso garante que ele espere o HTML carregar para fazer a leitura correta.
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", iniciarExtensao);
+} else {
+    iniciarExtensao();
+}
