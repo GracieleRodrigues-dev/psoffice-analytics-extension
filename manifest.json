@@ -11,7 +11,7 @@
   "permissions": ["storage"],
   "content_scripts": [
     {
-      "matches": ["*://psofficeapp.com.br/*"],
+      "matches": ["*://psofficeapp.com.br/*","*://*.psofficeapp.com.br/*"],
       "css": ["css/dashboard.css"],
       "js": [
         "libs/chart.js",

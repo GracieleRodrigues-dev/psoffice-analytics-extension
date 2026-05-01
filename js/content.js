@@ -1,34 +1,53 @@
-function gerarDashboard() {
+async function gerarDashboard() {
     const dados = coletarDadosTabela();
     if (!dados || dados.length === 0) return;
-
+    
     const periodo = extrairPeriodo();
-    criarDashboardContainer();
+    let feriados = [];
+    
+    if (periodo) {
+        const ano = parseDataBR(periodo.inicio).getFullYear();
+        feriados = await buscarFeriados(ano);
+    } else {
+        feriados = await buscarFeriados(new Date().getFullYear());
+    }
 
+    criarDashboardContainer();
+    
+    const chkFeriados = document.getElementById("ps-feriados-check");
+    chkFeriados.checked = localStorage.getItem("psConsiderarFeriados") === "true";
+    chkFeriados.addEventListener("change", () => {
+        localStorage.setItem("psConsiderarFeriados", chkFeriados.checked);
+    });
+    
     const porDia = agruparPorDia(dados);
     const porProjeto = agruparPorProjeto(dados);
     const totalSegundos = calcularTotal(dados);
-
+    
     document.getElementById("ps-total").innerText = segundosParaHHMMSS(totalSegundos);
-
+    
     gerarListaSemanal(dados);
-    configurarFinanceiro(totalSegundos, periodo);
-    configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegundos);
+    gerarTabelaFeriados(periodo, feriados);
+    configurarFinanceiro(totalSegundos, periodo, feriados);
+    configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegundos, feriados);
 }
 
-function configurarFinanceiro(totalSegundos, periodo) {
+function configurarFinanceiro(totalSegundos, periodo, feriados) {
     const inputRate = document.getElementById("ps-rate-input");
     const earningsDisplay = document.getElementById("ps-earnings");
     const projecaoDisplay = document.getElementById("ps-projecao-val");
     const projecaoMediaDisplay = document.getElementById("ps-projecao-media");
     const toggleBtn = document.getElementById("ps-toggle-eye");
-    let isHidden = true; 
+    const chkFeriados = document.getElementById("ps-feriados-check");
+    let isHidden = true;
     
     inputRate.value = localStorage.getItem("psHourlyRate") || "";
 
     function atualizarValor() {
+        const considerar = chkFeriados.checked;
+        const feriadosAtivos = considerar ? [] : feriados;
         let rate = parseFloat(inputRate.value.replace(',', '.')) || 0;
-        localStorage.setItem("psHourlyRate", inputRate.value); 
+        localStorage.setItem("psHourlyRate", inputRate.value);
         
         const totalHoras = totalSegundos / 3600;
         const totalDinheiro = totalHoras * rate;
@@ -40,13 +59,13 @@ function configurarFinanceiro(totalSegundos, periodo) {
         if (periodo) {
             const inicio = parseDataBR(periodo.inicio);
             const fim = parseDataBR(periodo.fim);
-            const diasUteisTotais = getDiasUteis(inicio, fim);
+            const diasUteisTotais = getDiasUteis(inicio, fim, feriadosAtivos);
 
             const hoje = new Date();
             hoje.setHours(0,0,0,0);
             
             let limitDate = hoje > fim ? fim : (hoje < inicio ? inicio : hoje);
-            let diasUteisPassados = getDiasUteis(inicio, limitDate);
+            let diasUteisPassados = getDiasUteis(inicio, limitDate, feriadosAtivos);
 
             if (diasUteisPassados === 0 && diasUteisTotais > 0) diasUteisPassados = 1;
 
@@ -81,18 +100,24 @@ function configurarFinanceiro(totalSegundos, periodo) {
             toggleBtn.style.opacity = "1";
         }
     }
+    
     inputRate.addEventListener("input", atualizarValor);
     toggleBtn.addEventListener("click", () => { isHidden = !isHidden; atualizarValor(); });
+    chkFeriados.addEventListener("change", atualizarValor);
     atualizarValor();
 }
 
-function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegundos) {
+function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegundos, feriados) {
     const inputMeta = document.getElementById("ps-goal-input");
+    const chkFeriados = document.getElementById("ps-feriados-check");
     inputMeta.value = localStorage.getItem("psDailyGoal") || "8.8";
-
+    
     function atualizarGraficosEMetas() {
         const metaDiaria = parseFloat(inputMeta.value.replace(',', '.')) || 8.8;
         localStorage.setItem("psDailyGoal", inputMeta.value);
+        
+        const considerar = chkFeriados.checked;
+        const feriadosAtivos = considerar ? [] : feriados;
 
         const metaAtingida = totalSegundos / 3600;
         let ritmo = 0, saldo = 0, metaTotal = 0;
@@ -100,16 +125,33 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
         if (periodo) {
             const inicio = parseDataBR(periodo.inicio);
             const fim = parseDataBR(periodo.fim);
-            const diasUteisTotais = getDiasUteis(inicio, fim);
             
+            const realStats = calcularEstatisticasPeriodo(inicio, fim, feriados);
+            const activeStats = calcularEstatisticasPeriodo(inicio, fim, feriadosAtivos);
+            
+            const diasUteisTotais = activeStats.diasUteis;
             metaTotal = diasUteisTotais * metaDiaria;
 
             const hoje = new Date();
             hoje.setHours(0,0,0,0);
             
             let limitDate = hoje > fim ? fim : (hoje < inicio ? inicio : hoje);
-            const diasUteisPassados = getDiasUteis(inicio, limitDate);
+            const diasUteisPassados = getDiasUteis(inicio, limitDate, feriadosAtivos);
             const diasUteisRestantes = diasUteisTotais - diasUteisPassados;
+            
+            const diasPassadosTotais = Math.floor((limitDate - inicio) / (1000 * 60 * 60 * 24)) + 1;
+            const mediaDia = diasPassadosTotais > 0 ? (metaAtingida / diasPassadosTotais).toFixed(2) : "0.00";
+            const mediaDiaUtil = diasUteisPassados > 0 ? (metaAtingida / diasUteisPassados).toFixed(2) : "0.00";
+
+            const statsHtml = `
+                <div style="display:flex; justify-content:space-between;"><span>Dias no Período:</span> <span>${realStats.totalDias}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Fins de Semana:</span> <span>${realStats.finsDeSemana}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Feriados:</span> <span>${realStats.diasFeriado}</span></div>
+                <div style="display:flex; justify-content:space-between; color:#fff; font-weight:bold; margin-top:4px;"><span>Dias Úteis (Meta):</span> <span>${activeStats.diasUteis}</span></div>
+                <div style="display:flex; justify-content:space-between; margin-top:6px; border-top: 1px solid #4b5563; padding-top: 6px;"><span>Média p/ Dia:</span> <span>${mediaDia}h</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Média p/ Dia Útil:</span> <span style="color:#10b981;">${mediaDiaUtil}h</span></div>
+            `;
+            document.getElementById("ps-period-stats").innerHTML = statsHtml;
 
             saldo = metaAtingida - (diasUteisPassados * metaDiaria);
 
@@ -118,6 +160,8 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
             } else if (diasUteisRestantes === 0 && metaAtingida < metaTotal) {
                 ritmo = metaTotal - metaAtingida;
             }
+        } else {
+            document.getElementById("ps-period-stats").innerHTML = `<div style="text-align:center;">Filtre um período</div>`;
         }
 
         const saldoEl = document.getElementById("ps-saldo-val");
@@ -128,7 +172,7 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
             saldoEl.style.color = saldo >= 0 ? "#84cc16" : "#f43f5e";
             
             if (ritmo === 0 && metaAtingida >= metaTotal) {
-                ritmoEl.innerText = "Meta Atingida! 🎉";
+                ritmoEl.innerText = "Meta Atingida!";
                 ritmoEl.style.color = "#84cc16";
             } else {
                 ritmoEl.innerText = ritmo.toFixed(2) + "h / dia";
@@ -143,14 +187,14 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
         }
 
         const porDiaCompleto = preencherDiasVazios(porDia, periodo);
-
-        gerarGraficoDias(porDiaCompleto, metaDiaria);
+        gerarGraficoDias(porDiaCompleto, metaDiaria, feriados, considerar);
         gerarGraficoProjetos(porProjeto);
         if (periodo) gerarGraficoVelocimetro(metaAtingida, metaTotal);
     }
 
     inputMeta.addEventListener("input", atualizarGraficosEMetas);
-    atualizarGraficosEMetas(); 
+    chkFeriados.addEventListener("change", atualizarGraficosEMetas);
+    atualizarGraficosEMetas();
 }
 
 function preencherDiasVazios(dadosPorDia, periodo) {
@@ -180,15 +224,25 @@ function preencherDiasVazios(dadosPorDia, periodo) {
     return diasCompletos;
 }
 
-function gerarGraficoDias(dados, metaDiaria) {
+function gerarGraficoDias(dados, metaDiaria, feriados = [], considerarFeriados = false) {
+    const feriadosMap = {};
+    feriados.forEach(f => {
+        const [y, m, d] = f.date.split('-');
+        feriadosMap[`${d}/${m}/${y}`] = f.name;
+    });
+
     const labels = Object.keys(dados).map(d => formatarDiaLabel(d));
     const valores = Object.values(dados).map(v => (v / 3600).toFixed(2));
     
     const cores = valores.map((v, i) => {
+        const dataStr = Object.keys(dados)[i];
         const isWeekend = labels[i].includes("Dom") || labels[i].includes("Sáb");
+        const isFeriado = feriadosMap[dataStr] !== undefined;
+        
+        if (isFeriado && !considerarFeriados) return "#a855f7";
         if (v == 0) return "#374151"; 
         if (isWeekend) return "#3b82f6"; 
-        return v >= metaDiaria ? "#84cc16" : "#f43f5e"; 
+        return v >= metaDiaria ? "#84cc16" : "#f43f5e";
     });
 
     const ctx = document.getElementById("chartDias");
@@ -218,31 +272,107 @@ function gerarGraficoDias(dados, metaDiaria) {
         }
     };
 
+    const holidayEmojiPlugin = {
+        id: 'holidayEmoji',
+        afterDatasetsDraw: function(chart) {
+            const ctx = chart.ctx;
+            const meta = chart.getDatasetMeta(0);
+            const dataKeys = Object.keys(dados);
+            
+            meta.data.forEach((bar, index) => {
+                const dataStr = dataKeys[index];
+                if (feriadosMap[dataStr]) {
+                    ctx.save();
+                    ctx.font = '16px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText('🏖️', bar.x, bar.y - 4);
+                    ctx.restore();
+                }
+            });
+        }
+    };
+
     window.myBarChart = new Chart(ctx, {
         type: "bar",
-        plugins: [horizontalLinePlugin],
+        plugins: [horizontalLinePlugin, holidayEmojiPlugin],
         data: { 
             labels: labels, 
             datasets: [{ label: "Horas", data: valores, backgroundColor: cores, borderRadius: 4 }] 
         },
         options: { 
+            layout: {
+                padding: { top: 20 }
+            },
             metaDiaria: metaDiaria, 
             responsive: true, maintainAspectRatio: false, 
-            plugins: { legend: { display: false } }, 
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const dataStr = Object.keys(dados)[context.dataIndex];
+                            if (feriadosMap[dataStr]) {
+                                return 'Feriado: ' + feriadosMap[dataStr];
+                            }
+                            return null;
+                        }
+                    }
+                }
+            }, 
             scales: { 
                 y: { beginAtZero: true, grid: { color: "#374151" }, ticks: { color: "#9ca3af" } }, 
                 x: { 
                     grid: { display: false }, 
-                    ticks: { 
-                        color: "#9ca3af", 
-                        autoSkip: false, 
-                        maxRotation: 45, 
-                        minRotation: 45
-                    } 
+                    ticks: { color: "#9ca3af", autoSkip: false, maxRotation: 45, minRotation: 45 } 
                 } 
             } 
         }
     });
+}
+
+function gerarTabelaFeriados(periodo, feriados) {
+    const container = document.getElementById("ps-holidays-list");
+    if (!container) return;
+
+    if (!periodo) {
+        container.innerHTML = "<div style='color: #6b7280; text-align: center; padding: 10px 0;'>Filtre um período</div>";
+        return;
+    }
+
+    const start = parseDataBR(periodo.inicio);
+    const end = parseDataBR(periodo.fim);
+    start.setHours(0,0,0,0);
+    end.setHours(0,0,0,0);
+
+    const feriadosNoPeriodo = feriados.filter(f => {
+        const [y, m, d] = f.date.split('-');
+        const fDate = new Date(y, m - 1, d);
+        return fDate >= start && fDate <= end;
+    });
+
+    if (feriadosNoPeriodo.length === 0) {
+        container.innerHTML = "<div style='color: #6b7280; text-align: center; padding: 10px 0;'>Nenhum feriado no período</div>";
+        return;
+    }
+
+    let html = '<table style="width: 100%; border-collapse: collapse;">';
+    html += '<thead><tr style="border-bottom: 1px solid #4b5563; color: #9ca3af; text-align: left;">';
+    html += '<th style="padding: 8px 4px; font-weight: normal;">Data</th>';
+    html += '<th style="padding: 8px 4px; font-weight: normal;">Feriado</th>';
+    html += '</tr></thead><tbody>';
+
+    feriadosNoPeriodo.forEach(f => {
+        const [y, m, d] = f.date.split('-');
+        const dataFmt = `${d}/${m}/${y}`;
+        html += `<tr style="border-bottom: 1px solid #374151; color: #d1d5db;">`;
+        html += `<td style="padding: 8px 4px; white-space: nowrap;">${dataFmt}</td>`;
+        html += `<td style="padding: 8px 4px;">${f.name}</td>`;
+        html += `</tr>`;
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 function gerarGraficoProjetos(dados) {
@@ -258,7 +388,7 @@ function gerarGraficoProjetos(dados) {
         options: { 
             responsive: true, maintainAspectRatio: false, 
             cutout: '70%', 
-            plugins: { legend: { display: false } } // Sintaxe Moderna V3 que esconde a legenda duplicada
+            plugins: { legend: { display: false } }
         }
     });
 
@@ -294,8 +424,8 @@ function gerarGraficoVelocimetro(atingido, total) {
         options: {
             responsive: true, maintainAspectRatio: false,
             cutout: '80%', 
-            rotation: -90, // Sintaxe Moderna V3 para Meio Círculo
-            circumference: 180, // Sintaxe Moderna V3 para Meio Círculo
+            rotation: -90, 
+            circumference: 180, 
             plugins: { legend: { display: false }, tooltip: { enabled: false } }
         }
     });
@@ -361,9 +491,7 @@ function esperarTabela() {
 }
 
 function sincronizarAnexosContinuamente() {
-    
     setInterval(() => {
-        // Verifica se estamos na tela de detalhes do resumo olhando se o botão de imprimir existe
         const botaoImprimir = document.querySelector('a[href*="addRep_0"], a[title*="Imprimir resumo"], button[title*="Imprimir resumo"]');
         
         if (botaoImprimir) {
@@ -379,11 +507,9 @@ function sincronizarAnexosContinuamente() {
             });
 
             if (linksAnexos.length > 0) {
-                // Remove links duplicados caso a tabela repita botões e salva na memória
                 const linksUnicos = [...new Set(linksAnexos)];
                 localStorage.setItem('ps_anexos_impressao', JSON.stringify(linksUnicos));
             } else {
-                // Se o resumo aberto NÃO tiver imagens, limpa a memória para não imprimir fantasmas
                 localStorage.removeItem('ps_anexos_impressao');
             }
         }
@@ -449,7 +575,6 @@ function iniciarExtensao() {
     if (isTelaRelatorioFinal) {
         montarAnexosNaImpressao();
     } else if (!isTelaFiltros) {
-        // Em todas as telas normais, rodamos o Dashboard e o Sincronizador de imagens
         if (typeof esperarTabela === "function") {
             esperarTabela();
         }
@@ -457,7 +582,6 @@ function iniciarExtensao() {
     }
 }
 
-// Garante que o código só execute depois que o HTML estiver pronto para ser lido
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", iniciarExtensao);
 } else {
