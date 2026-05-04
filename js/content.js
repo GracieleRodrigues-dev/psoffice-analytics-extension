@@ -101,8 +101,17 @@ function configurarFinanceiro(totalSegundos, periodo, feriados) {
         }
     }
     
-    inputRate.addEventListener("input", atualizarValor);
-    toggleBtn.addEventListener("click", () => { isHidden = !isHidden; atualizarValor(); });
+    inputRate.addEventListener("input", () => {
+        atualizarValor();
+        document.dispatchEvent(new Event("ps-rate-changed"));
+    });
+    
+    toggleBtn.addEventListener("click", () => { 
+        isHidden = !isHidden; 
+        atualizarValor(); 
+        document.dispatchEvent(new Event("ps-visibility-toggle"));
+    });
+    
     chkFeriados.addEventListener("change", atualizarValor);
     atualizarValor();
 }
@@ -112,6 +121,40 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
     const chkFeriados = document.getElementById("ps-feriados-check");
     inputMeta.value = localStorage.getItem("psDailyGoal") || "8.8";
     
+    let lastMetaAtingida = 0;
+    let lastMetaTotal = 0;
+
+    function renderizarFinanceiroMeta() {
+        const el = document.getElementById("ps-meta-finance-text");
+        if (!el) return;
+        
+        if (!periodo || lastMetaTotal === 0) {
+            el.style.display = "none";
+            return;
+        }
+        el.style.display = "block";
+
+        const rateInput = document.getElementById("ps-rate-input");
+        const isHidden = rateInput ? rateInput.type === "password" : true;
+        const rate = rateInput ? (parseFloat(rateInput.value.replace(',', '.')) || 0) : 0;
+
+        if (isHidden) {
+            el.innerText = "R$ -------- / R$ --------";
+        } else {
+            const valAtingido = (lastMetaAtingida * rate).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            const valTotal = (lastMetaTotal * rate).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            el.innerText = `${valAtingido} / ${valTotal}`;
+        }
+    }
+
+    if(window._psVisListener) document.removeEventListener("ps-visibility-toggle", window._psVisListener);
+    window._psVisListener = renderizarFinanceiroMeta;
+    document.addEventListener("ps-visibility-toggle", window._psVisListener);
+
+    if(window._psRateListener) document.removeEventListener("ps-rate-changed", window._psRateListener);
+    window._psRateListener = renderizarFinanceiroMeta;
+    document.addEventListener("ps-rate-changed", window._psRateListener);
+
     function atualizarGraficosEMetas() {
         const metaDiaria = parseFloat(inputMeta.value.replace(',', '.')) || 8.8;
         localStorage.setItem("psDailyGoal", inputMeta.value);
@@ -186,6 +229,10 @@ function configurarMetasEGraficos(dados, porDia, porProjeto, periodo, totalSegun
             ritmoEl.innerText = "--";
         }
 
+        lastMetaAtingida = metaAtingida;
+        lastMetaTotal = metaTotal;
+        renderizarFinanceiroMeta();
+
         const porDiaCompleto = preencherDiasVazios(porDia, periodo);
         gerarGraficoDias(porDiaCompleto, metaDiaria, feriados, considerar);
         gerarGraficoProjetos(porProjeto);
@@ -237,9 +284,7 @@ function gerarGraficoDias(dados, metaDiaria, feriados = [], considerarFeriados =
     const cores = valores.map((v, i) => {
         const dataStr = Object.keys(dados)[i];
         const isWeekend = labels[i].includes("Dom") || labels[i].includes("Sáb");
-        const isFeriado = feriadosMap[dataStr] !== undefined;
         
-        if (isFeriado && !considerarFeriados) return "#a855f7";
         if (v == 0) return "#374151"; 
         if (isWeekend) return "#3b82f6"; 
         return v >= metaDiaria ? "#84cc16" : "#f43f5e";

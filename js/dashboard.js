@@ -63,7 +63,7 @@ function criarDashboardContainer() {
                     </div>
                     <div class="ps-finance-body" style="align-items: flex-end;">
                         <label style="font-size: 11px; color: #9ca3af; display: flex; align-items: center; gap: 5px; cursor: pointer; margin-top: 10px;">
-                            <input type="checkbox" id="ps-feriados-check"> Considerar Feriado como Dia Útil
+                            <input type="checkbox" id="ps-feriados-check"> Considerar feriado como dia útil
                         </label>
                     </div>
                 </div>
@@ -90,6 +90,7 @@ function criarDashboardContainer() {
                         <div id="ps-gauge-info" style="text-align:center; z-index:10;">
                             <h2 id="ps-meta-pct" style="font-size: 32px; margin:0; color:#fff; line-height: 1;">0%</h2>
                             <div style="font-size:12px; color:#9ca3af; margin-top:2px;" id="ps-meta-total-text">0h / 0h</div>
+                            <div style="font-size:11px; color:#10b981; margin-top:4px; font-weight:bold;" id="ps-meta-finance-text">R$ -------- / R$ --------</div>
                         </div>
                     </div>
                     <div id="ps-period-stats" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #4b5563; font-size: 11px; color: #9ca3af; display: flex; flex-direction: column; gap: 4px; text-align: left;">
